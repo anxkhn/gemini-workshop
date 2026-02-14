@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Workshop</title>
+  <link rel="stylesheet" href="https://oat.ink/oat.min.css">
+  <script src="https://oat.ink/oat.min.js" defer></script>
+  <style>
+    :root { --accent: #4285f4; }
+    body { max-width: 1200px; margin: 0 auto; padding: 1rem; }
+    .section { margin-bottom: 1.5rem; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+    #output-area { min-height: 200px; max-height: 500px; overflow-y: auto;
+      background: var(--bg-secondary, #f5f5f5); border-radius: 6px; padding: 1rem;
+      font-family: monospace; white-space: pre-wrap; word-break: break-word; }
+    #debug-area, #rag-answer, #tool-log { max-height: 400px; overflow-y: auto;
+      background: var(--bg-secondary, #f5f5f5); border-radius: 6px; padding: 0.75rem;
+      font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; word-break: break-word; }
+    .chunk-card { border: 1px solid var(--border, #ddd); border-radius: 6px;
+      padding: 0.75rem; margin-bottom: 0.5rem; font-size: 0.85rem; }
+    .chunk-id { font-weight: bold; color: var(--accent); }
+    .chunk-dist { color: #888; font-size: 0.8rem; }
+    .badge-sm { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 4px;
+      font-size: 0.75rem; margin-right: 0.3rem; }
+    .badge-tool { background: #e8f0fe; color: #1a73e8; }
+    .badge-ok { background: #e6f4ea; color: #137333; }
+    .badge-err { background: #fce8e6; color: #c5221f; }
+    .token-bar { display: flex; gap: 1rem; font-size: 0.85rem; margin-top: 0.5rem; }
+    .token-bar span { padding: 0.2rem 0.5rem; background: #e8f0fe; border-radius: 4px; }
+    textarea { width: 100%; min-height: 80px; font-family: monospace; }
+    .param-group { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
+    .param-group label { flex: 1; min-width: 150px; }
+    .key-input { display: flex; gap: 0.5rem; align-items: end; }
+    .key-input input { flex: 1; }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.3rem; }
+    .status-ok { background: #34a853; }
+    .status-err { background: #ea4335; }
+    .status-loading { background: #fbbc04; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border, #ddd); padding-bottom: 0.75rem; }
+    nav button { font-size: 0.85rem; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .error-banner { padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem;
+      display: none; }
+    .error-banner.show { display: block; }
+    details { margin-bottom: 0.5rem; }
+    summary { cursor: pointer; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Gemini Workshop</h1>
+  <p>A hands-on exploration of the Gemini API: models, parameters, streaming, tool calling, and RAG.</p>
+
+  <div id="error-banner" class="error-banner" role="alert" data-variant="error"></div>
+
+  <!-- Navigation -->
+  <nav>
+    <button onclick="showTab('setup')" class="outline small" id="tab-btn-setup">Setup</button>
+    <button onclick="showTab('chat')" class="outline small" id="tab-btn-chat">Chat</button>
+    <button onclick="showTab('rag')" class="outline small" id="tab-btn-rag">RAG</button>
+    <button onclick="showTab('tools')" class="outline small" id="tab-btn-tools">Tools</button>
+    <button onclick="showTab('debug')" class="outline small" id="tab-btn-debug">Debug</button>
+  </nav>
+
+  <!-- ================================================================== -->
+  <!-- SETUP TAB -->
+  <!-- ================================================================== -->
+  <div id="tab-setup" class="tab-content active">
+    <article class="card section">
+      <header><h3>1. API Key</h3></header>
+      <p>Your key is stored only in your browser's localStorage. It is never logged or sent to any server except Google's API.</p>
+      <div class="key-input">
+        <label data-field style="flex:1">
+          Gemini API Key
+          <input type="password" id="api-key" placeholder="AIza..." autocomplete="off">
+        </label>
+        <button onclick="saveKey()">Save</button>
+        <button onclick="clearKey()" class="outline" data-variant="danger">Clear</button>
+      </div>
+      <p id="key-status" style="margin-top:0.5rem;font-size:0.9rem;"></p>
+    </article>
+
+    <article class="card section">
+      <header><h3>2. Select Model</h3></header>
+      <div style="display:flex;gap:0.5rem;align-items:end;">
+        <label data-field style="flex:1">
+          Model
+          <select id="model-select">
+            <option value="">-- Load models first --</option>
+          </select>
+        </label>
+        <button onclick="refreshModels()">Refresh Models</button>
+      </div>
+      <div id="model-info" style="margin-top:0.5rem;font-size:0.85rem;"></div>
+    </article>
+
+    <article class="card section">
+      <header><h3>3. Generation Parameters</h3></header>
+      <div class="param-group">
+        <label data-field>
+          Temperature (<span id="temp-val">1.0</span>)
+          <input type="range" id="temperature" min="0" max="2" step="0.05" value="1.0"
+            oninput="document.getElementById('temp-val').textContent=this.value">
+        </label>
+        <label data-field>
+          Top-P (<span id="topp-val">0.95</span>)
+          <input type="range" id="top-p" min="0" max="1" step="0.01" value="0.95"
+            oninput="document.getElementById('topp-val').textContent=this.value">
+        </label>
+        <label data-field>
+          Top-K
+          <input type="number" id="top-k" value="40" min="1" max="100">
+        </label>
+        <label data-field>
+          Max Tokens
+          <input type="number" id="max-tokens" value="2048" min="1" max="65536">
+        </label>
+      </div>
+      <div class="param-group" style="margin-top:0.75rem;">
+        <label data-field>
+          Stop Sequences (comma-separated)
+          <input type="text" id="stop-sequences" placeholder="e.g. STOP,END">
+        </label>
+        <label data-field>
+          Safety Level
+          <select id="safety-level">
+            <option value="default">Default</option>
+            <option value="none">None (Block nothing)</option>
+            <option value="low">Low (Block only high)</option>
+            <option value="high">High (Block low and above)</option>
+          </select>
+        </label>
+        <label data-field>
+          Response MIME Type
+          <select id="response-mime">
+            <option value="">Auto (text)</option>
+            <option value="application/json">JSON</option>
+            <option value="text/plain">Plain text</option>
+          </select>
+        </label>
+      </div>
+    </article>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- CHAT TAB -->
+  <!-- ================================================================== -->
+  <div id="tab-chat" class="tab-content">
+    <article class="card section">
+      <header><h3>System Prompt</h3></header>
+      <textarea id="system-prompt" placeholder="You are a helpful assistant..."></textarea>
+    </article>
+
+    <article class="card section">
+      <header><h3>User Prompt</h3></header>
+      <textarea id="user-prompt" rows="3" placeholder="Type your message here..."></textarea>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center;">
+        <button onclick="sendChat()" id="send-btn">Send (Streaming)</button>
+        <button onclick="sendChat(false)" class="outline">Send (No Stream)</button>
+        <label style="font-size:0.85rem;">
+          <input type="checkbox" id="enable-tools"> Enable Tools
+        </label>
+        <label style="font-size:0.85rem;">
+          <input type="checkbox" id="enable-web-search"> Web Search
+        </label>
+        <button onclick="clearChat()" class="outline small" data-variant="secondary">Clear</button>
+      </div>
+    </article>
+
+    <article class="card section">
+      <header>
+        <h3>Response</h3>
+        <div class="token-bar" id="token-usage" style="display:none;">
+          <span>Prompt: <b id="tok-prompt">0</b></span>
+          <span>Completion: <b id="tok-completion">0</b></span>
+          <span>Total: <b id="tok-total">0</b></span>
+        </div>
+      </header>
+      <div id="output-area">Responses will appear here...</div>
+    </article>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- RAG TAB -->
+  <!-- ================================================================== -->
+  <div id="tab-rag" class="tab-content">
+    <article class="card section">
+      <header><h3>Document Ingestion</h3></header>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <button onclick="ingestSamples()">Ingest Sample Docs</button>
+        <label data-field style="flex:1;min-width:200px;">
+          Upload a file (.txt, .md)
+          <input type="file" id="rag-file" accept=".txt,.md">
+        </label>
+        <button onclick="ingestFile()">Upload &amp; Ingest</button>
+      </div>
+      <div style="margin-top:0.5rem;">
+        <label data-field>
+          Or paste text directly
+          <textarea id="rag-paste-text" rows="3" placeholder="Paste document text here..."></textarea>
+        </label>
+        <div style="display:flex;gap:0.5rem;">
+          <input type="text" id="rag-paste-source" placeholder="Source name (e.g. my_notes.txt)" style="flex:1;">
+          <button onclick="ingestPaste()" class="outline">Ingest Pasted Text</button>
+        </div>
+      </div>
+      <div id="ingest-status" style="margin-top:0.5rem;font-size:0.9rem;"></div>
+    </article>
+
+    <article class="card section">
+      <header>
+        <h3>Collections</h3>
+        <button onclick="refreshCollections()" class="outline small">Refresh</button>
+      </header>
+      <div id="collections-list">Click Refresh to load.</div>
+    </article>
+
+    <article class="card section">
+      <header><h3>Ask with RAG</h3></header>
+      <textarea id="rag-query" rows="2" placeholder="Ask a question about your documents..."></textarea>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center;">
+        <button onclick="ragQuery()">Ask</button>
+        <label style="font-size:0.85rem;">
+          <input type="checkbox" id="rag-grounded" checked> Grounded mode (answer only from context)
+        </label>
+        <label data-field style="width:80px;">
+          Top-K
+          <input type="number" id="rag-topk" value="5" min="1" max="20">
+        </label>
+      </div>
+    </article>
+
+    <article class="card section">
+      <header><h3>RAG Answer</h3></header>
+      <div id="rag-answer">Answers will appear here...</div>
+    </article>
+
+    <article class="card section">
+      <header><h3>Retrieved Chunks</h3></header>
+      <div id="rag-chunks">Chunks will appear here after a query...</div>
+    </article>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- TOOLS TAB -->
+  <!-- ================================================================== -->
+  <div id="tab-tools" class="tab-content">
+    <article class="card section">
+      <header><h3>Available Tools</h3></header>
+      <p>These tools are available to the model when "Enable Tools" is checked in the Chat tab.</p>
+      <div id="tool-schemas">Loading...</div>
+    </article>
+
+    <article class="card section">
+      <header><h3>Manual Tool Test</h3></header>
+      <div class="grid-2">
+        <div>
+          <label data-field>
+            Tool
+            <select id="manual-tool">
+              <option value="calc">calc</option>
+              <option value="search_docs">search_docs</option>
+              <option value="web_search">web_search</option>
+            </select>
+          </label>
+          <label data-field>
+            Arguments (JSON)
+            <textarea id="manual-tool-args" rows="2">{"expression": "2 + 3 * 4"}</textarea>
+          </label>
+          <button onclick="manualToolExec()">Execute</button>
+        </div>
+        <div>
+          <b>Result:</b>
+          <pre id="manual-tool-result" style="background:var(--bg-secondary,#f5f5f5);padding:0.5rem;border-radius:4px;min-height:60px;"></pre>
+        </div>
+      </div>
+    </article>
+
+    <article class="card section">
+      <header><h3>Tool Call Log</h3></header>
+      <p>When tools are enabled in chat, tool calls and results appear here.</p>
+      <div id="tool-log">No tool calls yet.</div>
+    </article>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- DEBUG TAB -->
+  <!-- ================================================================== -->
+  <div id="tab-debug" class="tab-content">
+    <article class="card section">
+      <header><h3>Raw Request</h3></header>
+      <div id="debug-request" class="debug-area" style="max-height:400px;overflow-y:auto;background:var(--bg-secondary,#f5f5f5);border-radius:6px;padding:0.75rem;font-family:monospace;font-size:0.85rem;white-space:pre-wrap;">No request sent yet.</div>
+    </article>
+    <article class="card section">
+      <header><h3>Raw Response / Events</h3></header>
+      <div id="debug-area">No response yet.</div>
+    </article>
+  </div>
+
+<script>
+// ========================================================================
+// State
+// ========================================================================
+let API_KEY = "";
+let currentModel = "";
+let toolLog = [];
+let debugEvents = [];
+
+// ========================================================================
+// Tab management
+// ========================================================================
+function showTab(name) {
+  document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll("nav button").forEach(el => el.classList.remove(""));
+  document.getElementById("tab-" + name).classList.add("active");
+  if (name === "tools") loadToolSchemas();
+}
+
+// ========================================================================
+// Error handling
+// ========================================================================
+function showError(msg, duration = 8000) {
+  const banner = document.getElementById("error-banner");
+  banner.textContent = msg;
+  banner.classList.add("show");
+  if (duration > 0) setTimeout(() => banner.classList.remove("show"), duration);
+}
+
+function clearError() {
+  document.getElementById("error-banner").classList.remove("show");
+}
+
+// ========================================================================
+// API Key
+// ========================================================================
+function saveKey() {
+  const key = document.getElementById("api-key").value.trim();
+  if (!key) { showError("Please enter an API key."); return; }
+  localStorage.setItem("gemini_api_key", key);
+  API_KEY = key;
+  document.getElementById("key-status").innerHTML =
+    '<span class="status-dot status-ok"></span>Key saved in browser. Never sent to our server.';
+  refreshModels();
+}
+
+function clearKey() {
+  localStorage.removeItem("gemini_api_key");
+  API_KEY = "";
+  document.getElementById("api-key").value = "";
+  document.getElementById("key-status").innerHTML =
+    '<span class="status-dot status-err"></span>Key cleared.';
+}
+
+function loadKey() {
+  const stored = localStorage.getItem("gemini_api_key");
+  if (stored) {
+    API_KEY = stored;
+    document.getElementById("api-key").value = stored;
+    document.getElementById("key-status").innerHTML =
+      '<span class="status-dot status-ok"></span>Key loaded from browser storage.';
+  }
+}
+
+// ========================================================================
+// Fetch helper with retries
+// ========================================================================
+async function apiFetch(url, options = {}, retries = 3) {
+  let lastErr;
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.ok) return res;
+      const body = await res.text();
+      let detail = body;
+      try { detail = JSON.parse(body).detail || body; } catch {}
+      if (res.status === 429 || res.status >= 500) {
+        lastErr = `Server error (${res.status}): ${detail}`;
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i)));
+        continue;
+      }
+      throw new Error(detail);
+    } catch (err) {
+      if (err.name === "TypeError" && err.message.includes("fetch")) {
+        lastErr = "Network error. Is the server running?";
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(lastErr || "Request failed after retries.");
+}
+
+// ========================================================================
+// Models
+// ========================================================================
+async function refreshModels() {
+  if (!API_KEY) { showError("Set your API key first."); return; }
+  clearError();
+  const sel = document.getElementById("model-select");
+  sel.innerHTML = '<option value="">Loading...</option>';
+
+  try {
+    const res = await apiFetch(`/api/models?api_key=${encodeURIComponent(API_KEY)}`);
+    const data = await res.json();
+    sel.innerHTML = "";
+    const models = data.models || [];
+    // Sort: generation models first, then embedding
+    models.sort((a, b) => {
+      const aGen = (a.name || "").includes("gemini") && !(a.name || "").includes("embedding");
+      const bGen = (b.name || "").includes("gemini") && !(b.name || "").includes("embedding");
+      if (aGen && !bGen) return -1;
+      if (!aGen && bGen) return 1;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m.name;
+      opt.textContent = `${m.display_name || m.name}`;
+      if (m.input_token_limit) opt.textContent += ` (in:${m.input_token_limit}, out:${m.output_token_limit})`;
+      sel.appendChild(opt);
+    }
+    if (models.length > 0) {
+      sel.value = models.find(m => m.name && m.name.includes("flash"))?.name || models[0].name;
+      currentModel = sel.value;
+      updateModelInfo();
+    }
+  } catch (err) {
+    showError("Failed to load models: " + err.message);
+    sel.innerHTML = '<option value="">Error loading models</option>';
+  }
+}
+
+document.getElementById("model-select").addEventListener("change", function() {
+  currentModel = this.value;
+  updateModelInfo();
+});
+
+async function updateModelInfo() {
+  if (!currentModel) return;
+  try {
+    const res = await apiFetch(`/api/model-card?model=${encodeURIComponent(currentModel)}`);
+    const data = await res.json();
+    document.getElementById("model-info").innerHTML =
+      `Family: <b>${data.family}</b> | <a href="${data.card_link}" target="_blank">View Model Card</a> | ${data.note}`;
+  } catch {}
+}
+
+// ========================================================================
+// Chat
+// ========================================================================
+async function sendChat(stream = true) {
+  if (!API_KEY) { showError("Set your API key first."); return; }
+  if (!currentModel) { showError("Select a model first."); return; }
+  clearError();
+
+  const userMsg = document.getElementById("user-prompt").value.trim();
+  if (!userMsg) { showError("Enter a message."); return; }
+
+  const outputArea = document.getElementById("output-area");
+  const sendBtn = document.getElementById("send-btn");
+  sendBtn.disabled = true;
+  sendBtn.textContent = "Sending...";
+  outputArea.textContent = "";
+  document.getElementById("token-usage").style.display = "none";
+  toolLog = [];
+  debugEvents = [];
+
+  const stopSeqs = document.getElementById("stop-sequences").value
+    .split(",").map(s => s.trim()).filter(Boolean);
+
+  const payload = {
+    api_key: API_KEY,
+    model: currentModel,
+    system_prompt: document.getElementById("system-prompt").value,
+    user_message: userMsg,
+    temperature: parseFloat(document.getElementById("temperature").value),
+    top_p: parseFloat(document.getElementById("top-p").value),
+    top_k: parseInt(document.getElementById("top-k").value),
+    max_output_tokens: parseInt(document.getElementById("max-tokens").value),
+    stop_sequences: stopSeqs,
+    safety_level: document.getElementById("safety-level").value,
+    response_mime_type: document.getElementById("response-mime").value,
+    stream: stream,
+    enable_tools: document.getElementById("enable-tools").checked,
+    enable_web_search: document.getElementById("enable-web-search").checked,
+  };
+
+  // Debug: show request
+  const debugReq = { ...payload, api_key: "***REDACTED***" };
+  document.getElementById("debug-request").textContent = JSON.stringify(debugReq, null, 2);
+
+  try {
+    if (stream) {
+      await streamChat(payload, outputArea);
+    } else {
+      const res = await apiFetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      outputArea.textContent = data.text || "(empty response)";
+
+      if (data.tool_calls && data.tool_calls.length > 0) {
+        for (const tc of data.tool_calls) {
+          addToolLog("call", tc.name, tc.args);
+        }
+      }
+      if (data.usage) showUsage(data.usage);
+      if (data.raw_request) {
+        document.getElementById("debug-request").textContent = JSON.stringify(data.raw_request, null, 2);
+      }
+      document.getElementById("debug-area").textContent = JSON.stringify(data.raw_response || data, null, 2);
+    }
+  } catch (err) {
+    showError("Chat failed: " + err.message);
+    outputArea.textContent = "Error: " + err.message;
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = "Send (Streaming)";
+  }
+}
+
+async function streamChat(payload, outputArea) {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let detail = text;
+    try { detail = JSON.parse(text).detail || text; } catch {}
+    throw new Error(detail);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const jsonStr = line.slice(6);
+      try {
+        const evt = JSON.parse(jsonStr);
+        debugEvents.push(evt);
+
+        switch (evt.type) {
+          case "text":
+            outputArea.textContent += evt.text;
+            break;
+          case "tool_call":
+            addToolLog("call", evt.name, evt.args);
+            outputArea.textContent += `\n[Tool call: ${evt.name}(${JSON.stringify(evt.args)})]\n`;
+            break;
+          case "tool_result":
+            addToolLog("result", evt.name, evt.result);
+            outputArea.textContent += `[Tool result: ${JSON.stringify(evt.result)}]\n`;
+            break;
+          case "usage":
+            showUsage(evt.usage);
+            break;
+          case "debug":
+            document.getElementById("debug-request").textContent = JSON.stringify(evt.raw_request, null, 2);
+            break;
+          case "error":
+            showError("Stream error: " + evt.error);
+            outputArea.textContent += "\nError: " + evt.error;
+            break;
+          case "done":
+            break;
+        }
+      } catch {}
+    }
+  }
+
+  document.getElementById("debug-area").textContent = JSON.stringify(debugEvents, null, 2);
+}
+
+function showUsage(usage) {
+  document.getElementById("token-usage").style.display = "flex";
+  document.getElementById("tok-prompt").textContent = usage.prompt_tokens || 0;
+  document.getElementById("tok-completion").textContent = usage.completion_tokens || 0;
+  document.getElementById("tok-total").textContent = usage.total_tokens || 0;
+}
+
+function clearChat() {
+  document.getElementById("output-area").textContent = "Responses will appear here...";
+  document.getElementById("debug-area").textContent = "No response yet.";
+  document.getElementById("debug-request").textContent = "No request sent yet.";
+  document.getElementById("token-usage").style.display = "none";
+  toolLog = [];
+  debugEvents = [];
+}
+
+// ========================================================================
+// RAG
+// ========================================================================
+async function ingestSamples() {
+  if (!API_KEY) { showError("Set your API key first."); return; }
+  clearError();
+  const status = document.getElementById("ingest-status");
+  status.innerHTML = '<span class="status-dot status-loading"></span>Ingesting sample docs...';
+
+  try {
+    const form = new FormData();
+    form.append("api_key", API_KEY);
+    const res = await apiFetch("/api/rag/ingest-samples", { method: "POST", body: form });
+    const data = await res.json();
+    status.innerHTML = '<span class="status-dot status-ok"></span>Ingested ' +
+      data.results.length + ' documents. ' +
+      data.results.map(r => `${r.source}: ${r.chunks} chunks`).join(", ");
+    refreshCollections();
+  } catch (err) {
+    status.innerHTML = '<span class="status-dot status-err"></span>' + err.message;
+    showError("Ingest failed: " + err.message);
+  }
+}
+
+async function ingestFile() {
+  if (!API_KEY) { showError("Set your API key first."); return; }
+  const fileInput = document.getElementById("rag-file");
+  if (!fileInput.files.length) { showError("Select a file first."); return; }
+  clearError();
+  const status = document.getElementById("ingest-status");
+  status.innerHTML = '<span class="status-dot status-loading"></span>Ingesting file...';
+
+  try {
+    const form = new FormData();
+    form.append("api_key", API_KEY);
+    form.append("file", fileInput.files[0]);
+    const res = await apiFetch("/api/rag/ingest", { method: "POST", body: form });
+    const data = await res.json();
+    status.innerHTML = `<span class="status-dot status-ok"></span>Ingested: ${data.source} (${data.chunks} chunks)`;
+    refreshCollections();
+  } catch (err) {
+    status.innerHTML = '<span class="status-dot status-err"></span>' + err.message;
+    showError("Ingest failed: " + err.message);
+  }
+}
+
+async function ingestPaste() {
+  if (!API_KEY) { showError("Set your API key first."); return; }
+  const text = document.getElementById("rag-paste-text").value.trim();
+  if (!text) { showError("Paste some text first."); return; }
+  clearError();
+  const source = document.getElementById("rag-paste-source").value.trim() || "pasted_text";
+  const status = document.getElementById("ingest-status");
+  status.innerHTML = '<span class="status-dot status-loading"></span>Ingesting text...';
+
+  try {
+    const form = new FormData();
+    form.append("api_key", API_KEY);
+    form.append("text", text);
+    form.append("source", source);
+    const res = await apiFetch("/api/rag/ingest", { method: "POST", body: form });
+    const data = await res.json();
+    status.innerHTML = `<span class="status-dot status-ok"></span>Ingested: ${data.source} (${data.chunks} chunks)`;
+    refreshCollections();
+  } catch (err) {
+    status.innerHTML = '<span class="status-dot status-err"></span>' + err.message;
+    showError("Ingest failed: " + err.message);
+  }
+}
+
+async function refreshCollections() {
+  try {
+    const res = await apiFetch("/api/rag/collections");
+    const data = await res.json();
+    const el = document.getElementById("collections-list");
+    if (!data.collections || data.collections.length === 0) {
+      el.innerHTML = "No collections yet. Ingest some documents first.";
+      return;
+    }
+    el.innerHTML = data.collections.map(c =>
+      `<span class="badge-sm badge-ok">${c.name}</span> (${c.count} chunks)`
+    ).join(" &middot; ");
+  } catch {}
+}
+
+async function ragQuery() {
+  if (!API_KEY) { showError("Set your API key first."); return; }
+  if (!currentModel) { showError("Select a model first."); return; }
+  const query = document.getElementById("rag-query").value.trim();
+  if (!query) { showError("Enter a question."); return; }
+  clearError();
+
+  document.getElementById("rag-answer").textContent = "Thinking...";
+  document.getElementById("rag-chunks").textContent = "Retrieving...";
+
+  try {
+    const res = await apiFetch("/api/rag/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: API_KEY,
+        query: query,
+        model: currentModel,
+        top_k: parseInt(document.getElementById("rag-topk").value),
+        grounded: document.getElementById("rag-grounded").checked,
+        temperature: 0.3,
+      }),
+    });
+    const data = await res.json();
+    document.getElementById("rag-answer").textContent = data.answer || "No answer.";
+
+    // Show chunks
+    const chunksEl = document.getElementById("rag-chunks");
+    if (data.chunks && data.chunks.length > 0) {
+      chunksEl.innerHTML = data.chunks.map(c => `
+        <div class="chunk-card">
+          <span class="chunk-id">${c.id}</span>
+          <span class="chunk-dist">(distance: ${c.distance != null ? c.distance.toFixed(4) : "n/a"})</span>
+          <br><small>${c.metadata?.source || ""}</small>
+          <p>${c.text}</p>
+        </div>
+      `).join("");
+    } else {
+      chunksEl.textContent = "No chunks retrieved.";
+    }
+
+    if (data.usage) showUsage(data.usage);
+  } catch (err) {
+    document.getElementById("rag-answer").textContent = "Error: " + err.message;
+    showError("RAG query failed: " + err.message);
+  }
+}
+
+// ========================================================================
+// Tools
+// ========================================================================
+async function loadToolSchemas() {
+  try {
+    const res = await apiFetch("/api/tools/schemas");
+    const data = await res.json();
+    const el = document.getElementById("tool-schemas");
+    el.innerHTML = (data.tools || []).map(t => `
+      <details>
+        <summary><code>${t.name}</code> - ${t.description.substring(0, 100)}...</summary>
+        <pre style="font-size:0.8rem;">${JSON.stringify(t.parameters, null, 2)}</pre>
+      </details>
+    `).join("");
+  } catch {}
+}
+
+async function manualToolExec() {
+  if (!API_KEY) { showError("Set your API key first."); return; }
+  clearError();
+  const tool = document.getElementById("manual-tool").value;
+  let args;
+  try {
+    args = JSON.parse(document.getElementById("manual-tool-args").value);
+  } catch {
+    showError("Invalid JSON in arguments.");
+    return;
+  }
+
+  const resultEl = document.getElementById("manual-tool-result");
+  resultEl.textContent = "Executing...";
+
+  try {
+    const res = await apiFetch("/api/tools/execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: API_KEY, tool_name: tool, args }),
+    });
+    const data = await res.json();
+    resultEl.textContent = JSON.stringify(data.result, null, 2);
+  } catch (err) {
+    resultEl.textContent = "Error: " + err.message;
+  }
+}
+
+function addToolLog(type, name, data) {
+  toolLog.push({ type, name, data, time: new Date().toISOString() });
+  const el = document.getElementById("tool-log");
+  el.innerHTML = toolLog.map(entry => {
+    const badge = entry.type === "call"
+      ? '<span class="badge-sm badge-tool">CALL</span>'
+      : '<span class="badge-sm badge-ok">RESULT</span>';
+    return `<div style="margin-bottom:0.5rem;">${badge}<b>${entry.name}</b>
+      <pre style="font-size:0.8rem;margin:0.2rem 0;">${JSON.stringify(entry.data, null, 2)}</pre></div>`;
+  }).join("");
+}
+
+document.getElementById("manual-tool").addEventListener("change", function() {
+  const examples = {
+    calc: '{"expression": "2 + 3 * 4"}',
+    search_docs: '{"query": "What is Python?"}',
+    web_search: '{"query": "latest news today"}',
+  };
+  document.getElementById("manual-tool-args").value = examples[this.value] || "{}";
+});
+
+// ========================================================================
+// Init
+// ========================================================================
+window.addEventListener("DOMContentLoaded", () => {
+  loadKey();
+  if (API_KEY) refreshModels();
+  refreshCollections();
+});
+</script>
+</body>
+</html>
