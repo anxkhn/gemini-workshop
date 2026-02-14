@@ -2,6 +2,9 @@
 
 import os
 
+# Disable ChromaDB telemetry (avoids posthog connection errors)
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
 # --- Server ---
 HOST = "127.0.0.1"
 PORT = 8000

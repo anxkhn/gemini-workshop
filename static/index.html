@@ -32,8 +32,11 @@
     textarea { width: 100%; min-height: 80px; font-family: monospace; }
     .param-group { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
     .param-group label { flex: 1; min-width: 150px; }
-    .key-input { display: flex; gap: 0.5rem; align-items: end; }
+    .key-input { display: flex; gap: 0.5rem; align-items: flex-end; }
     .key-input input { flex: 1; }
+    .key-input button { margin-bottom: 2px; height: fit-content; }
+    .model-row { display: flex; gap: 0.5rem; align-items: flex-end; }
+    .model-row button { margin-bottom: 2px; height: fit-content; }
     .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.3rem; }
     .status-ok { background: #34a853; }
     .status-err { background: #ea4335; }
@@ -41,7 +44,7 @@
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
     nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;
       border-bottom: 1px solid var(--border, #ddd); padding-bottom: 0.75rem; }
-    nav button { font-size: 0.85rem; }
+    nav button { font-size: 0.85rem; cursor: pointer; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
     .error-banner { padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem;
@@ -86,7 +89,7 @@
 
     <article class="card section">
       <header><h3>2. Select Model</h3></header>
-      <div style="display:flex;gap:0.5rem;align-items:end;">
+      <div class="model-row">
         <label data-field style="flex:1">
           Model
           <select id="model-select">
@@ -315,8 +318,10 @@ let debugEvents = [];
 // ========================================================================
 function showTab(name) {
   document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
-  document.querySelectorAll("nav button").forEach(el => el.classList.remove(""));
+  document.querySelectorAll("nav button").forEach(el => el.removeAttribute("data-variant"));
   document.getElementById("tab-" + name).classList.add("active");
+  const btn = document.getElementById("tab-btn-" + name);
+  if (btn) btn.setAttribute("data-variant", "primary");
   if (name === "tools") loadToolSchemas();
 }
 
@@ -811,6 +816,7 @@ document.getElementById("manual-tool").addEventListener("change", function() {
 // ========================================================================
 window.addEventListener("DOMContentLoaded", () => {
   loadKey();
+  showTab("setup");
   if (API_KEY) refreshModels();
   refreshCollections();
 });
